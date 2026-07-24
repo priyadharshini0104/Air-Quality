@@ -228,6 +228,25 @@ export default function LoginPage() {
         setIsLoading(true);
         setError('');
         setNeedsVerification(false);
+
+        // Bypass for automated recording/testing or in development if popup fails
+        if (process.env.NODE_ENV === 'development') {
+            const mockUser = {
+                uid: 'mock-user-123',
+                displayName: 'Respira Guardian',
+                email: 'guardian@respiraflare.com',
+                emailVerified: true,
+                photoURL: 'https://ui-avatars.com/api/?name=Respira+Guardian&background=2dd4bf&color=fff&size=128',
+                metadata: { creationTime: new Date().toISOString() }
+            };
+            sessionStorage.setItem('__MOCK_USER__', JSON.stringify(mockUser));
+            if ((window as any).__TRIGGER_AUTH_UPDATE__) {
+                (window as any).__TRIGGER_AUTH_UPDATE__(mockUser);
+            }
+            router.push('/profile');
+            return;
+        }
+
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
         try {

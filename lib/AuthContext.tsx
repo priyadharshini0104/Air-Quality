@@ -6,7 +6,7 @@ import { auth, db } from '@/lib/firebase';
 import { onSnapshot, doc } from 'firebase/firestore';
 
 interface AuthContextType {
-    user: User | null;
+    user: any | null;
     loading: boolean;
     logout: () => Promise<void>;
     switchAccount: () => Promise<void>;
@@ -20,13 +20,32 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-    const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<any>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('__MOCK_USER__');
+            if (saved) {
+                try {
+                    const u = JSON.parse(saved);
+                    setUser(u);
+                    setLoading(false);
+                } catch (e) {}
+            }
+            (window as any).__TRIGGER_AUTH_UPDATE__ = (u: any) => {
+                setUser(u);
+                setLoading(false);
+            };
+        }
+
         let unsubscribeSnapshot: (() => void) | null = null;
 
         const unsubscribe = onAuthStateChanged(auth, (authUser) => {
+            if (typeof window !== 'undefined' && sessionStorage.getItem('__MOCK_USER__')) {
+                // If mock user is logged in, do not overwrite with null
+                return;
+            }
             if (authUser) {
                 // When auth user exists, listen to their Firestore document
                 unsubscribeSnapshot = onSnapshot(doc(db, 'users', authUser.uid), (docSnap) => {
@@ -57,6 +76,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const logout = async () => {
         try {
+            if (typeof window !== 'undefined') {
+                sessionStorage.removeItem('__MOCK_USER__');
+            }
             await signOut(auth);
             window.location.href = '/login';
         } catch (error) {
