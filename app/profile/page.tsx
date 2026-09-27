@@ -1,269 +1,256 @@
-"use client";
+'use client';
 
-import { Bell, Shield, Settings, LogOut, User as UserIcon, Heart, Sparkles, MapPin, RefreshCw } from 'lucide-react';
-import styles from './profile.module.css';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { fetchAllData, getAqiLevel } from '@/lib/api';
 
-export default function ProfilePage() {
-    const { user, loading, logout, switchAccount } = useAuth();
-    const router = useRouter();
-    const [currentLoc, setCurrentLoc] = useState<any>(null);
-    const [locLoading, setLocLoading] = useState(true);
-    const [alertSent, setAlertSent] = useState(false);
-    const [alertSending, setAlertSending] = useState(false);
-    const [alertError, setAlertError] = useState(false);
-    const [testMailUrl, setTestMailUrl] = useState<string | null>(null);
+const HEALTH_PROFILES = [
+  { id: 'pregnancy', label: '🤰 Pregnant / Expecting Mother', tag: 'High Maternal Sensitivity', aqiThreshold: 45, info: 'Baby & maternal lung barrier care' },
+  { id: 'asthma', label: '🫁 Asthma / Chronic Wheezing', tag: 'Severe Respiratory Trigger', aqiThreshold: 50, info: 'SOS inhaler readiness & PM2.5 alarms' },
+  { id: 'sinus', label: '🤧 Sinusitis & Dust Allergy', tag: 'Nasal Mucosa Vulnerable', aqiThreshold: 55, info: 'Evening steam & particulate defense' },
+  { id: 'skin', label: '🧴 Eczema, Acne & Sensitive Skin', tag: 'Dermal Barrier Damage', aqiThreshold: 50, info: 'Face photo test & ceramide barrier' },
+  { id: 'cardio', label: '❤️ Heart Disease / Hypertension', tag: 'Oxygen Flow Strain', aqiThreshold: 50, info: 'Zero heavy outdoor workouts' },
+  { id: 'elderly', label: '👵 Senior Citizen / COPD', tag: 'Immune & Lung Guard', aqiThreshold: 45, info: 'Complete indoor air filtered protection' },
+  { id: 'general', label: '🌿 None (General Healthy Living)', tag: 'Preventive Wellness', aqiThreshold: 100, info: 'Hydration & clean commute tracking' },
+];
 
-    // Auto-fire real email exactly once per session if AQI > 50
-    useEffect(() => {
-        if (currentLoc && currentLoc.aqi > 50 && user?.email_or_phone && !alertSent && !alertSending && !alertError) {
-            setAlertSending(true);
-            
-            fetch('/api/send-alert', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    email: user.email_or_phone, 
-                    aqi: currentLoc.aqi,
-                    location: currentLoc.displayName
-                })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if(data.success) {
-                    setAlertSent(true);
-                    if (data.testUrl) {
-                        setTestMailUrl(data.testUrl);
-                    }
-                } else {
-                    console.error("Mail backend failure (Check .env configs):", data.message);
-                    setAlertError(true);
-                }
-                setAlertSending(false);
-            })
-            .catch(err => {
-                console.error("Fetch email failed:", err);
-                setAlertError(true);
-                setAlertSending(false);
-            });
-        }
-    }, [currentLoc, user, alertSent, alertSending, alertError]);
+export default function RegisterAndSentinel() {
+  const { user } = useAuth();
 
-    useEffect(() => {
-        if (!loading && user && navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                async (pos) => {
-                    try {
-                        const { latitude, longitude } = pos.coords;
-                        let cityName = "Your Location";
-                        try {
-                            const revRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-                            const revData = await revRes.json();
-                            if (revData && revData.address) {
-                                const ad = revData.address;
-                                const localName = ad.city || ad.town || ad.village || ad.suburb || ad.neighbourhood || ad.county || ad.state_district;
-                                const stateName = ad.state;
-                                
-                                if (localName && stateName) {
-                                    cityName = `${localName}, ${stateName}`;
-                                } else {
-                                    cityName = localName || stateName || "Your Location";
-                                }
-                            }
-                        } catch (e) { }
+  const [userName, setUserName] = useState('Priyadharshini');
+  const [email, setEmail] = useState('priyadharshinidhanasekaran057@gmail.com');
+  const [phone, setPhone] = useState('9940969045');
+  const [primaryCity, setPrimaryCity] = useState('Attayampatti');
+  const [selectedCondition, setSelectedCondition] = useState('pregnancy');
 
-                        const data = await fetchAllData(cityName, latitude, longitude);
-                        setCurrentLoc(data);
-                    } catch (err) {
-                        console.error(err);
-                    } finally {
-                        setLocLoading(false);
-                    }
-                },
-                (err) => {
-                    console.error("Location access denied", err);
-                    setLocLoading(false);
-                }
-            );
-        } else if (!loading && !user) {
-            setLocLoading(false);
-        }
-    }, [user, loading]);
+  const [liveAqi, setLiveAqi] = useState<number>(57);
+  const [statusMsg, setStatusMsg] = useState<string>('🟢 Automated Sentinel Active — Monitoring environment for your profile...');
+  const [lastDispatchedTime, setLastDispatchedTime] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (!loading && !user) {
-            router.push('/login');
-        }
-    }, [user, loading, router]);
+  const prevAqiRef = useRef<number | null>(null);
 
-    if (loading) {
-        return <div className={styles.loading}>Loading...</div>;
+  useEffect(() => {
+    if (user?.name) setUserName(user.name);
+    if (user?.email) setEmail(user.email);
+
+    const savedCond = localStorage.getItem('respira_user_condition');
+    if (savedCond) setSelectedCondition(savedCond);
+
+    const savedCity = localStorage.getItem('respira_user_city');
+    if (savedCity) setPrimaryCity(savedCity);
+
+    const savedPhone = localStorage.getItem('respira_user_phone');
+    if (savedPhone) setPhone(savedPhone);
+  }, [user]);
+
+  const dispatchCareNotification = async (city: string, aqiVal: number, cond: string) => {
+    try {
+      setStatusMsg(`🌸 Preparing personalized health guidance for ${userName} (${cond})...`);
+
+      const cleanPhone = phone.startsWith('+') ? phone : `+91${phone.replace(/^0+/, '')}`;
+
+      const res = await fetch('/api/send-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userName,
+          email,
+          phone: cleanPhone,
+          location: city,
+          condition: cond,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const timeNow = new Date().toLocaleTimeString();
+        setLastDispatchedTime(timeNow);
+        setStatusMsg(`✅ Sent dedicated ${cond} care bulletin to Email & SMS at ${timeNow}!`);
+      }
+    } catch (e: any) {
+      console.error('Dispatch error:', e);
     }
+  };
 
-    if (!user) {
-        return null;
-    }
+  // Background Live Satellite AQI Polling
+  useEffect(() => {
+    const fetchRealAir = async () => {
+      try {
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(primaryCity)}&count=1&language=en&format=json`
+        );
+        const geo = await geoRes.json();
+        if (geo.results && geo.results.length > 0) {
+          const { latitude, longitude, name } = geo.results[0];
 
-    const userData = {
-        name: user.displayName || "User",
-        email: user.email || "No email",
-        joinedDate: user.metadata.creationTime ? new Date(user.metadata.creationTime).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : "Recently",
-        photoURL: user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=fb7185&color=fff&size=128`
+          const airRes = await fetch(
+            `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${latitude}&longitude=${longitude}&current=us_aqi`
+          );
+          const airData = await airRes.json();
+
+          if (airData.current) {
+            const currentAqi = Math.round(airData.current.us_aqi || 57);
+            setLiveAqi(currentAqi);
+
+            const activeProfile = HEALTH_PROFILES.find((p) => p.id === selectedCondition) || HEALTH_PROFILES[0];
+
+            if (currentAqi >= activeProfile.aqiThreshold && prevAqiRef.current !== currentAqi) {
+              prevAqiRef.current = currentAqi;
+              dispatchCareNotification(name, currentAqi, selectedCondition);
+            } else {
+              setStatusMsg(`🟢 Sentinel observing ${name}: AQI ${currentAqi}. Watching your ${selectedCondition} safety.`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Air poll error:', err);
+      }
     };
 
-    return (
-        <div className={`${styles.container} container`}>
-            <header className={styles.profileHeader}>
-                <div className={styles.avatar}>
-                    <img src={userData.photoURL} alt="Avatar" />
-                </div>
-                <div className={styles.profileInfo}>
-                    <div className={styles.nameRow}>
-                        <h1>{userData.name}</h1>
-                        <span className={styles.memberBadge}>Member</span>
-                    </div>
-                    <p className={styles.email}>{userData.email}</p>
-                    <p className={styles.memberSince}>Member since {userData.joinedDate}</p>
-                </div>
-                <div className={styles.headerActions}>
-                    <button className={styles.switchBtn} onClick={switchAccount} title="Switch Account">
-                        <RefreshCw size={18} /> Switch
-                    </button>
-                    <button className={styles.logoutBtn} onClick={logout}>
-                        <LogOut size={18} /> Logout
-                    </button>
-                </div>
-            </header>
+    fetchRealAir();
+    const interval = setInterval(fetchRealAir, 30000);
+    return () => clearInterval(interval);
+  }, [primaryCity, selectedCondition, email, phone]);
 
-            <div className={styles.dashboard}>
-                {/* Health Section */}
-                <div className={`${styles.dashCard} glass-card`}>
-                    <div className={styles.dashHeader}>
-                        <Heart size={20} color="#fb7185" />
-                        <h3>Health Profile</h3>
-                    </div>
-                    <div className={styles.cardContent}>
-                        <p className={styles.emptyMsg}>No health conditions added yet.</p>
-                        <button className={styles.addBtn}>+ Add Condition</button>
-                    </div>
-                </div>
+  const handleRegisterSave = () => {
+    localStorage.setItem('respira_user_condition', selectedCondition);
+    localStorage.setItem('respira_user_city', primaryCity);
+    localStorage.setItem('respira_user_phone', phone);
+    prevAqiRef.current = null;
+    dispatchCareNotification(primaryCity, liveAqi, selectedCondition);
+  };
 
-                {/* Current Location Section */}
-                <div className={`${styles.dashCard} glass-card`}>
-                    <div className={styles.dashHeader}>
-                        <MapPin size={20} color="#6366f1" />
-                        <h3>Your Current Location</h3>
-                    </div>
-                    <div className={styles.cardContent}>
-                        {locLoading ? (
-                            <p className={styles.emptyMsg}>Locating you...</p>
-                        ) : currentLoc ? (
-                            <div className={styles.locationList}>
-                                <div className={styles.locationItem}>
-                                    <div>
-                                        <p className={styles.locationName}>{currentLoc.displayName}</p>
-                                        <p className={styles.locationMeta}>Lat: {currentLoc.lat.toFixed(2)}, Lng: {currentLoc.lng.toFixed(2)} • {currentLoc.aqi} AQI</p>
-                                    </div>
-                                    <span style={{ 
-                                        backgroundColor: getAqiLevel(currentLoc.aqi).color + '20', 
-                                        color: getAqiLevel(currentLoc.aqi).color,
-                                        padding: '4px 12px',
-                                        borderRadius: '20px',
-                                        fontSize: '12px',
-                                        fontWeight: 600
-                                    }}>
-                                        {getAqiLevel(currentLoc.aqi).label}
-                                    </span>
-                                </div>
-                            </div>
-                        ) : (
-                            <p className={styles.emptyMsg}>Location permission denied or unavailable.</p>
-                        )}
-                    </div>
-                </div>
-
-                {/* Notifications/Alerts Section */}
-                <div className={`${styles.dashCard} glass-card`}>
-                    <div className={styles.dashHeader}>
-                        <Bell size={20} color={currentLoc?.aqi > 200 ? "#ef4444" : "#f59e0b"} />
-                        <h3>Alerts</h3>
-                    </div>
-                    <div className={styles.cardContent}>
-                        {locLoading ? (
-                            <p className={styles.emptyMsg}>Checking health alerts...</p>
-                        ) : currentLoc ? (
-                            <div className={styles.alertItem}>
-                                <span className={styles.alertDot} style={{ background: currentLoc.aqi > 200 ? '#ef4444' : (currentLoc.aqi > 100 ? '#f59e0b' : '#10b981') }}></span>
-                                <div style={{ flex: 1 }}>
-                                    <p>
-                                        <strong>{currentLoc.displayName}:</strong>{' '}
-                                        {currentLoc.aqi > 200 
-                                            ? `CRITICAL ALERT (AQI ${currentLoc.aqi}): Air quality is extremely hazardous! Avoid all outdoor physical activity and wear a mask if you must go outside.` 
-                                            : currentLoc.aqi > 100
-                                            ? `Warning (AQI ${currentLoc.aqi}): Air quality is unhealthy. Sensitive groups should reduce prolonged outdoor exertion.`
-                                            : `Air quality is looking great today (${currentLoc.aqi} AQI)! Enjoy your outdoor activities.`}
-                                    </p>
-                                    
-                                    {/* Automated Real Email Warning */}
-                                    {currentLoc.aqi > 50 && (
-                                        <div style={{ marginTop: '14px', background: currentLoc.aqi > 200 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)', border: currentLoc.aqi > 200 ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(245, 158, 11, 0.2)', padding: '12px', borderRadius: '8px' }}>
-                                            <div style={{ fontSize: '12px', color: '#10b981', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                                                <Bell size={18} />
-                                                <div style={{ width: '100%' }}>
-                                                    <strong style={{ fontSize: '13px', color: alertError ? '#fca5a5' : '#10b981' }}>
-                                                        {alertError ? 'Automated Email Failed' : (alertSending ? 'Dispatching Email...' : 'Automated Email Dispatch Sent!')}
-                                                    </strong><br/>
-                                                    
-                                                    {alertError ? (
-                                                        <span style={{ color: '#fca5a5', display: 'inline-block', marginTop: '6px' }}>
-                                                            Could not dispatch real email. Please ensure the app developers added a configured Gmail App Password to their .env file (EMAIL_USER / EMAIL_PASS).
-                                                        </span>
-                                                    ) : (
-                                                        <span style={{ color: currentLoc.aqi > 200 ? '#fca5a5' : '#fcd34d', display: 'inline-block', marginTop: '6px' }}>
-                                                            {currentLoc.aqi > 200 ? 'CRITICAL:' : 'WARNING:'} An emergency health alert has been automatically sent to your registered inbox <strong>{user?.email_or_phone || 'email'}</strong>! Please check your mail carefully.
-                                                        </span>
-                                                    )}
-
-                                                    {/* ETHEREAL INBOX PREVIEW LINK */}
-                                                    {testMailUrl && !alertSending && (
-                                                        <div style={{ marginTop: '10px' }}>
-                                                            <a 
-                                                                href={testMailUrl} 
-                                                                target="_blank" 
-                                                                rel="noreferrer"
-                                                                style={{ display: 'inline-block', padding: '6px 12px', background: 'rgba(16, 185, 129, 0.2)', color: '#6ee7b7', border: '1px solid #10b981', borderRadius: '4px', textDecoration: 'none', fontWeight: 'bold' }}
-                                                            >
-                                                                View Sent Email in Live Sandbox ↗
-                                                            </a>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <p className={styles.emptyMsg}>Please enable location to view your alerts.</p>
-                        )}
-                    </div>
-                </div>
-
-                {/* Security/Access Section */}
-                <div className={`${styles.dashCard} glass-card`}>
-                    <div className={styles.dashHeader}>
-                        <Shield size={20} color="#10b981" />
-                        <h3>Account Security</h3>
-                    </div>
-                    <div className={styles.cardContent}>
-                        <p className={styles.infoText}>Google Authentication is enabled for your account.</p>
-                        <button className={styles.actionLink}>Manage Access</button>
-                    </div>
-                </div>
-            </div>
+  return (
+    <div style={{ minHeight: '100vh', width: '100%', background: '#070d19', color: '#f8fafc', padding: '35px 24px' }}>
+      <div style={{ maxWidth: '1240px', margin: '0 auto', width: '100%' }}>
+        
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '14px' }}>
+          <div>
+            <h1 style={{ fontSize: '30px', fontWeight: 800, color: '#2dd4bf', margin: 0 }}>
+              Respira <span style={{ color: '#38bdf8' }}>Flare</span> Patient &amp; Maternal Sentinel
+            </h1>
+            <p style={{ color: '#94a3b8', fontSize: '14px', margin: '4px 0 0' }}>
+              Personalized air exposure alerts mapped directly to your medical vulnerability
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <span style={{ background: '#134e4a', color: '#2dd4bf', padding: '10px 18px', borderRadius: '12px', fontSize: '14px', fontWeight: 600 }}>
+              📍 {primaryCity}
+            </span>
+            <span style={{ background: liveAqi > 50 ? '#854d0e' : '#064e3b', color: liveAqi > 50 ? '#fef08a' : '#6ee7b7', padding: '10px 18px', borderRadius: '12px', fontSize: '14px', fontWeight: 700 }}>
+              AQI: {liveAqi}
+            </span>
+          </div>
         </div>
-    );
+
+        {/* Live Sentinel Tracker */}
+        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '14px 20px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ fontSize: '14px', color: '#38bdf8', fontWeight: 500 }}>{statusMsg}</div>
+          {lastDispatchedTime && (
+            <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+              Last Dispatch: <b style={{ color: '#2dd4bf' }}>{lastDispatchedTime}</b>
+            </div>
+          )}
+        </div>
+
+        {/* Two-Column Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+          
+          {/* Form Card */}
+          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '18px', padding: '24px' }}>
+            <h2 style={{ fontSize: '18px', color: '#f1f5f9', marginTop: 0, marginBottom: '16px' }}>
+              📝 Patient &amp; User Registration
+            </h2>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Full Name</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Monitored City / Zone</label>
+                <input
+                  type="text"
+                  value={primaryCity}
+                  onChange={(e) => setPrimaryCity(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Email ID for Health Bulletins</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Mobile Number for Direct SMS</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
+              </div>
+
+              <button
+                onClick={handleRegisterSave}
+                style={{ marginTop: '10px', padding: '14px', borderRadius: '10px', background: 'linear-gradient(135deg, #14b8a6, #06b6d4)', color: '#020617', border: 'none', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}
+              >
+                💾 Save Profile &amp; Dispatch Empathetic Health Alert
+              </button>
+            </div>
+          </div>
+
+          {/* Condition Selector Card */}
+          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '18px', padding: '24px' }}>
+            <h2 style={{ fontSize: '18px', color: '#f1f5f9', marginTop: 0, marginBottom: '6px' }}>
+              🩺 Select Primary Health Vulnerability
+            </h2>
+            <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0 0 16px' }}>
+              Alerts and recommendations will explicitly address your chosen condition:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {HEALTH_PROFILES.map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => setSelectedCondition(p.id)}
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    background: selectedCondition === p.id ? '#134e4a30' : '#1e293b',
+                    border: selectedCondition === p.id ? '1px solid #2dd4bf' : '1px solid #334155',
+                    cursor: 'pointer',
+                    transition: '0.2s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <b style={{ color: selectedCondition === p.id ? '#2dd4bf' : '#f1f5f9', fontSize: '14px' }}>{p.label}</b>
+                    <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#070d19', color: '#38bdf8' }}>
+                      {p.tag}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                    Threshold: AQI {p.aqiThreshold} • {p.info}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
 }

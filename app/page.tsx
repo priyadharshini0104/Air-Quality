@@ -1,229 +1,256 @@
-"use client";
+'use client';
 
-import Link from 'next/link';
-import { Activity, Droplets, ArrowRight, Wind, Leaf, ChevronDown, Search, MapPin, Loader2, Thermometer, AlertCircle } from 'lucide-react';
-import styles from './page.module.css';
-import { useState, useRef, useEffect } from 'react';
-import { fetchAllData, getAqiLevel, type LocationEnvironmentData, type GeoResult } from '@/lib/api';
-import LocationAutocomplete from '@/components/LocationAutocomplete';
-import Logo from '@/components/Logo';
+import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '@/lib/AuthContext';
 
-import AtmosphericAnimation from '@/components/AtmosphericAnimation';
+const HEALTH_PROFILES = [
+  { id: 'pregnancy', label: '🤰 Pregnant / Expecting Mother', tag: 'High Maternal Sensitivity', aqiThreshold: 45, info: 'Baby & maternal lung barrier care' },
+  { id: 'asthma', label: '🫁 Asthma / Chronic Wheezing', tag: 'Severe Respiratory Trigger', aqiThreshold: 50, info: 'SOS inhaler readiness & PM2.5 alarms' },
+  { id: 'sinus', label: '🤧 Sinusitis & Dust Allergy', tag: 'Nasal Mucosa Vulnerable', aqiThreshold: 55, info: 'Evening steam & particulate defense' },
+  { id: 'skin', label: '🧴 Eczema, Acne & Sensitive Skin', tag: 'Dermal Barrier Damage', aqiThreshold: 50, info: 'Face photo test & ceramide barrier' },
+  { id: 'cardio', label: '❤️ Heart Disease / Hypertension', tag: 'Oxygen Flow Strain', aqiThreshold: 50, info: 'Zero heavy outdoor workouts' },
+  { id: 'elderly', label: '👵 Senior Citizen / COPD', tag: 'Immune & Lung Guard', aqiThreshold: 45, info: 'Complete indoor air filtered protection' },
+  { id: 'general', label: '🌿 None (General Healthy Living)', tag: 'Preventive Wellness', aqiThreshold: 100, info: 'Hydration & clean commute tracking' },
+];
 
-export default function Home() {
-  const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<LocationEnvironmentData | null>(null);
-  const [error, setError] = useState('');
-  const resultsRef = useRef<HTMLDivElement>(null);
+export default function RegisterAndSentinel() {
+  const { user } = useAuth();
 
-  const handleSearch = async (geo?: GeoResult) => {
-    const searchInput = geo ? geo.displayName : query;
-    if (!searchInput.trim()) return;
+  const [userName, setUserName] = useState('Priyadharshini');
+  const [email, setEmail] = useState('priyadharshinidhanasekaran057@gmail.com');
+  const [phone, setPhone] = useState('9940969045');
+  const [primaryCity, setPrimaryCity] = useState('Attayampatti');
+  const [selectedCondition, setSelectedCondition] = useState('pregnancy');
 
-    setLoading(true);
-    setError('');
+  const [liveAqi, setLiveAqi] = useState<number>(57);
+  const [statusMsg, setStatusMsg] = useState<string>('🟢 Automated Sentinel Active — Monitoring environment for your profile...');
+  const [lastDispatchedTime, setLastDispatchedTime] = useState<string | null>(null);
+
+  const prevAqiRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (user?.name) setUserName(user.name);
+    if (user?.email) setEmail(user.email);
+
+    const savedCond = localStorage.getItem('respira_user_condition');
+    if (savedCond) setSelectedCondition(savedCond);
+
+    const savedCity = localStorage.getItem('respira_user_city');
+    if (savedCity) setPrimaryCity(savedCity);
+
+    const savedPhone = localStorage.getItem('respira_user_phone');
+    if (savedPhone) setPhone(savedPhone);
+  }, [user]);
+
+  const dispatchCareNotification = async (city: string, aqiVal: number, cond: string) => {
     try {
-      const data = await fetchAllData(searchInput, geo?.lat, geo?.lng);
-      setResult(data);
-      if (geo) setQuery(geo.displayName);
-      setTimeout(() => {
-        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-    } catch (err: any) {
-      setError(err.message || 'Location not found');
-      setResult(null);
-    } finally {
-      setLoading(false);
+      setStatusMsg(`🌸 Preparing personalized health guidance for ${userName} (${cond})...`);
+
+      const cleanPhone = phone.startsWith('+') ? phone : `+91${phone.replace(/^0+/, '')}`;
+
+      const res = await fetch('/api/send-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userName,
+          email,
+          phone: cleanPhone,
+          location: city,
+          condition: cond,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const timeNow = new Date().toLocaleTimeString();
+        setLastDispatchedTime(timeNow);
+        setStatusMsg(`✅ Sent dedicated ${cond} care bulletin to Email & SMS at ${timeNow}!`);
+      }
+    } catch (e: any) {
+      console.error('Dispatch error:', e);
     }
   };
 
-  const level = result ? getAqiLevel(result.aqi) : null;
+  // Background Live Satellite AQI Polling
+  useEffect(() => {
+    const fetchRealAir = async () => {
+      try {
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(primaryCity)}&count=1&language=en&format=json`
+        );
+        const geo = await geoRes.json();
+        if (geo.results && geo.results.length > 0) {
+          const { latitude, longitude, name } = geo.results[0];
+
+          const airRes = await fetch(
+            `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${latitude}&longitude=${longitude}&current=us_aqi`
+          );
+          const airData = await airRes.json();
+
+          if (airData.current) {
+            const currentAqi = Math.round(airData.current.us_aqi || 57);
+            setLiveAqi(currentAqi);
+
+            const activeProfile = HEALTH_PROFILES.find((p) => p.id === selectedCondition) || HEALTH_PROFILES[0];
+
+            if (currentAqi >= activeProfile.aqiThreshold && prevAqiRef.current !== currentAqi) {
+              prevAqiRef.current = currentAqi;
+              dispatchCareNotification(name, currentAqi, selectedCondition);
+            } else {
+              setStatusMsg(`🟢 Sentinel observing ${name}: AQI ${currentAqi}. Watching your ${selectedCondition} safety.`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Air poll error:', err);
+      }
+    };
+
+    fetchRealAir();
+    const interval = setInterval(fetchRealAir, 30000);
+    return () => clearInterval(interval);
+  }, [primaryCity, selectedCondition, email, phone]);
+
+  const handleRegisterSave = () => {
+    localStorage.setItem('respira_user_condition', selectedCondition);
+    localStorage.setItem('respira_user_city', primaryCity);
+    localStorage.setItem('respira_user_phone', phone);
+    prevAqiRef.current = null;
+    dispatchCareNotification(primaryCity, liveAqi, selectedCondition);
+  };
 
   return (
-    <div className={styles.page}>
-      {/* Animated background */}
-      <div className={styles.heroBackground}>
-        <div className={styles.videoOverlay} />
-        <AtmosphericAnimation />
-      </div>
-
-      {/* Hero */}
-      <section className={styles.hero}>
-        <div className={styles.brand}>
-          <Logo size={120} className={styles.heroLogo} />
-          <div className={styles.brandText}>
-            <h1 className={styles.brandName}>
-              Respira <span style={{ color: '#2dd4bf', fontWeight: 900 }}>Flare</span>
+    <div style={{ minHeight: '100vh', width: '100%', background: '#070d19', color: '#f8fafc', padding: '35px 24px' }}>
+      <div style={{ maxWidth: '1240px', margin: '0 auto', width: '100%' }}>
+        
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '14px' }}>
+          <div>
+            <h1 style={{ fontSize: '30px', fontWeight: 800, color: '#2dd4bf', margin: 0 }}>
+              Respira <span style={{ color: '#38bdf8' }}>Flare</span> Patient &amp; Maternal Sentinel
             </h1>
-            <p className={styles.brandTagline}>
-              <Droplets size={16} className={styles.sparkleIcon} />
-              Your Environmental Wellness Guardian
+            <p style={{ color: '#94a3b8', fontSize: '14px', margin: '4px 0 0' }}>
+              Personalized air exposure alerts mapped directly to your medical vulnerability
             </p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <span style={{ background: '#134e4a', color: '#2dd4bf', padding: '10px 18px', borderRadius: '12px', fontSize: '14px', fontWeight: 600 }}>
+              📍 {primaryCity}
+            </span>
+            <span style={{ background: liveAqi > 50 ? '#854d0e' : '#064e3b', color: liveAqi > 50 ? '#fef08a' : '#6ee7b7', padding: '10px 18px', borderRadius: '12px', fontSize: '14px', fontWeight: 700 }}>
+              AQI: {liveAqi}
+            </span>
           </div>
         </div>
 
-        <p className={styles.heroSubtitle}>
-          Real-time awareness for your health and planet. Protecting your lungs and your skin from the invisible threats of pollution.
-        </p>
-
-        {/* Hero Search Section */}
-        <div className={styles.heroSearch}>
-          <div className={styles.searchForm}>
-            <div className={styles.searchInputWrapper}>
-              <LocationAutocomplete
-                value={query}
-                onChange={setQuery}
-                onSelect={(geo) => handleSearch(geo)}
-                onEnter={() => handleSearch()}
-                placeholder="Search your city for instant details..."
-                className={styles.searchInput}
-              />
+        {/* Live Sentinel Tracker */}
+        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '14px 20px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ fontSize: '14px', color: '#38bdf8', fontWeight: 500 }}>{statusMsg}</div>
+          {lastDispatchedTime && (
+            <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+              Last Dispatch: <b style={{ color: '#2dd4bf' }}>{lastDispatchedTime}</b>
             </div>
-            <button type="button" className={styles.searchBtn} disabled={loading} onClick={() => handleSearch()}>
-              {loading ? <Loader2 size={18} className={styles.spin} /> : 'Check Air Quality'}
-            </button>
-          </div>
-          {error && <p className={styles.searchError}><AlertCircle size={14} /> {error}</p>}
+          )}
         </div>
 
-        {/* Main Cards */}
-        <div className={styles.cards}>
-          {/* Health Care Card */}
-          <Link href="/health-care" className={styles.card} id="healthcare-btn">
-            <div className={styles.cardGlow} style={{ background: 'radial-gradient(circle, rgba(251,113,133,0.25) 0%, transparent 70%)' }} />
-            <div className={styles.cardIcon} style={{ background: 'rgba(251,113,133,0.12)', borderColor: 'rgba(251,113,133,0.3)' }}>
-              <Activity size={36} color="#fb7185" strokeWidth={1.5} />
-            </div>
-            <h2 className={styles.cardTitle}>Healthcare</h2>
-            <p className={styles.cardDesc}>
-              Interactive global map with real-time AQI and pollution monitoring. Personalized alerts based on your health conditions.
-            </p>
-            <div className={styles.cardTags}>
-              <span className={styles.tag} style={{ borderColor: 'rgba(251,113,133,0.3)', color: '#fb7185' }}>🌍 Global Map</span>
-              <span className={styles.tag} style={{ borderColor: 'rgba(251,113,133,0.3)', color: '#fb7185' }}>🚨 Health Alerts</span>
-            </div>
-            <div className={styles.cardArrow}>
-              <ArrowRight size={20} color="#fb7185" />
-            </div>
-          </Link>
+        {/* Two-Column Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+          
+          {/* Form Card */}
+          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '18px', padding: '24px' }}>
+            <h2 style={{ fontSize: '18px', color: '#f1f5f9', marginTop: 0, marginBottom: '16px' }}>
+              📝 Patient &amp; User Registration
+            </h2>
 
-          {/* Skin Care Card */}
-          <Link href="/skin-care" className={styles.card} id="skincare-btn">
-            <div className={styles.cardGlow} style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.25) 0%, transparent 70%)' }} />
-            <div className={styles.cardIcon} style={{ background: 'rgba(167,139,250,0.12)', borderColor: 'rgba(167,139,250,0.3)' }}>
-              <Droplets size={36} color="#a78bfa" strokeWidth={1.5} />
-            </div>
-            <h2 className={styles.cardTitle}>Skincare</h2>
-            <p className={styles.cardDesc}>
-              Analyze how current air quality affects your skin type. Get personalized protection advice and AI face analysis.
-            </p>
-            <div className={styles.cardTags}>
-              <span className={styles.tag} style={{ borderColor: 'rgba(167,139,250,0.3)', color: '#a78bfa' }}>✨ Skin Damage Analysis</span>
-              <span className={styles.tag} style={{ borderColor: 'rgba(167,139,250,0.3)', color: '#a78bfa' }}>🧴 Precautions</span>
-            </div>
-            <div className={styles.cardArrow}>
-              <ArrowRight size={20} color="#a78bfa" />
-            </div>
-          </Link>
-        </div>
-
-
-      </section>
-
-      {/* Search Results Section - The "Further Details" */}
-      {result && level && (
-        <section className={styles.liveResults} ref={resultsRef}>
-          <div className={styles.container}>
-            <div className={styles.resultsGrid}>
-              <div className={styles.resultsInfo}>
-                <div className={styles.locationBadge}>
-                  <MapPin size={16} /> {result.displayName}
-                </div>
-                <div style={{ display: 'flex', gap: '8px', fontSize: '10px', color: 'rgba(255,255,255,0.5)', marginBottom: '12px', fontWeight: 600 }}>
-                  <span>{result.lat.toFixed(3)}°N, {result.lng.toFixed(3)}°E</span>
-                  <span>•</span>
-                  <span style={{ color: '#38bdf8' }}>REAL-TIME API: OPEN-METEO</span>
-                </div>
-                <h2 className={styles.resultsTitle}>
-                  Current Air Quality is <span style={{ color: level.color }}>{level.label}</span>
-                </h2>
-                <p className={styles.resultsDesc}>
-                  The AQI in {result.displayName} is currently <strong>{result.aqi}</strong>.
-                  {result.aqi > 100 ? ' We recommend avoiding prolonged outdoor activities.' : ' The air is generally safe for everyone today.'}
-                </p>
-
-                <div className={styles.miniStats}>
-                  <div className={styles.miniStat}>
-                    <Thermometer size={18} color="#f87171" />
-                    <span>{result.temp}°C</span>
-                    <label>Temp</label>
-                  </div>
-                  <div className={styles.miniStat}>
-                    <Droplets size={18} color="#38bdf8" />
-                    <span>{result.humidity}%</span>
-                    <label>Humidity</label>
-                  </div>
-                  <div className={styles.miniStat}>
-                    <Wind size={18} color="#34d399" />
-                    <span>{result.windSpeed} km/h</span>
-                    <label>Wind</label>
-                  </div>
-                </div>
-
-                <Link href={`/health-care?lat=${result.lat}&lng=${result.lng}`} className={styles.detailsBtn}>
-                  Personalized Health Advice <ArrowRight size={16} />
-                </Link>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Full Name</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
               </div>
 
-              <div className={styles.resultsGauge} style={{ backgroundColor: level.bg, borderColor: level.color + '30' }}>
-                <span className={styles.gaugeEmoji}>{level.emoji}</span>
-                <span className={styles.gaugeValue} style={{ color: level.color }}>{result.aqi}</span>
-                <span className={styles.gaugeLabel}>Global US AQI</span>
-                <div className={styles.gaugeBar}>
-                  <div className={styles.gaugeProgress} style={{ width: `${Math.min(100, (result.aqi / 300) * 100)}%`, backgroundColor: level.color }} />
-                </div>
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Monitored City / Zone</label>
+                <input
+                  type="text"
+                  value={primaryCity}
+                  onChange={(e) => setPrimaryCity(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
               </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Email ID for Health Bulletins</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Mobile Number for Direct SMS</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  style={{ width: '100%', padding: '11px', borderRadius: '10px', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: '14px' }}
+                />
+              </div>
+
+              <button
+                onClick={handleRegisterSave}
+                style={{ marginTop: '10px', padding: '14px', borderRadius: '10px', background: 'linear-gradient(135deg, #14b8a6, #06b6d4)', color: '#020617', border: 'none', fontWeight: 700, cursor: 'pointer', fontSize: '14px' }}
+              >
+                💾 Save Profile &amp; Dispatch Empathetic Health Alert
+              </button>
             </div>
           </div>
-        </section>
-      )}
 
+          {/* Condition Selector Card */}
+          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '18px', padding: '24px' }}>
+            <h2 style={{ fontSize: '18px', color: '#f1f5f9', marginTop: 0, marginBottom: '6px' }}>
+              🩺 Select Primary Health Vulnerability
+            </h2>
+            <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0 0 16px' }}>
+              Alerts and recommendations will explicitly address your chosen condition:
+            </p>
 
-
-      {/* Feature row */}
-      <section className={styles.features}>
-        <div className={styles.featuresInner}>
-          <h2 className={styles.sectionTitle}>
-            Full Awareness, <span className="gradient-text">Total Protection</span>
-          </h2>
-          <div className={styles.featureGrid}>
-            {[
-              { icon: '🌬️', title: 'Real-time AQI', desc: 'Live pollutant data from global stations.', href: '/map' },
-              { icon: '🚨', title: 'Personalized Alerts', desc: 'Health-specific warnings for Asthma & Allergies.', href: '/health-care' },
-              { icon: '🌾', title: 'Crop Advisory', desc: 'Pollution-reducing plant suggestions for your area.', href: '/crop' },
-              { icon: '🚗', title: 'Traffic Monitor', desc: 'Live congestion data to identify pollution hotspots.', href: '/traffic' },
-            ].map((f) => (
-              <Link key={f.title} href={f.href} className={`${styles.featureCard} glass-card`}>
-                <span className={styles.featureEmoji}>{f.icon}</span>
-                <h3 className={styles.featureTitle}>{f.title}</h3>
-                <p className={styles.featureDesc}>{f.desc}</p>
-              </Link>
-            ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {HEALTH_PROFILES.map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => setSelectedCondition(p.id)}
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    background: selectedCondition === p.id ? '#134e4a30' : '#1e293b',
+                    border: selectedCondition === p.id ? '1px solid #2dd4bf' : '1px solid #334155',
+                    cursor: 'pointer',
+                    transition: '0.2s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <b style={{ color: selectedCondition === p.id ? '#2dd4bf' : '#f1f5f9', fontSize: '14px' }}>{p.label}</b>
+                    <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#070d19', color: '#38bdf8' }}>
+                      {p.tag}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                    Threshold: AQI {p.aqiThreshold} • {p.info}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
-
-      <footer className={styles.footer}>
-        <div className={styles.footerInner}>
-          <span className={styles.footerLogo}>
-            <Logo size={32} style={{ marginRight: '12px' }} />
-            Respira<span style={{ color: '#2dd4bf', fontWeight: 700 }}>Flare</span>
-          </span>
-          <p>© 2026 Respira Flare. Breathing life into environmental health.</p>
 
         </div>
-      </footer>
+      </div>
     </div>
   );
 }
